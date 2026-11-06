@@ -70,12 +70,15 @@ h1 { margin: 2px 0 0; font-family: var(--display); font-stretch: 72%; font-weigh
 .xmsg.bad { color: var(--mt); }
 .impbox { background: var(--sheet); border: 2px solid var(--pen); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
 .impbox p { margin: 0; }
-#sync[data-mode=cloud]::before, #sync[data-mode=gh]::before { content: "● "; color: var(--ok); }
-#sync[data-mode=saving]::before, #sync[data-mode=gh-saving]::before { content: "◐ "; color: var(--pen); }
-#sync[data-mode=local]::before, #sync[data-mode=offline]::before, #sync[data-mode=gh-off]::before { content: "○ "; }
-#sync[data-mode=gh-token]::before { content: "○ "; color: var(--mt); }
+#sync[data-mode=cloud]::before, #sync[data-mode=acc]::before { content: "● "; color: var(--ok); }
+#sync[data-mode=saving]::before, #sync[data-mode=acc-saving]::before { content: "◐ "; color: var(--pen); }
+#sync[data-mode=local]::before, #sync[data-mode=offline]::before, #sync[data-mode=acc-off]::before { content: "○ "; }
+#sync[data-mode=acc-sessao]::before { content: "○ "; color: var(--mt); }
 .ghsync { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 0 0 16px; }
 .ghsync h3 { margin-top: 0; }
+.accform { display: grid; gap: 10px; max-width: 420px; margin-top: 10px; }
+.accform label { display: grid; gap: 4px; font-weight: 700; font-size: 14px; }
+.accform input { font: inherit; font-size: 16px; font-weight: 400; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink); }
 .ghdevs { margin: 4px 0 10px; padding-left: 20px; font-size: 14.5px; }
 .tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
 .tabs button { font: inherit; font-family: var(--display); font-stretch: 85%; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; font-size: 15px; background: none; border: 0; border-bottom: 3px solid transparent; color: var(--ink2); padding: 8px 14px 9px; cursor: pointer; white-space: nowrap; }
@@ -341,7 +344,7 @@ main { padding-block: 22px 96px; }
         <label><input type="radio" name="lem" id="lem-en" value="ING">Inglês</label>
         <label><input type="radio" name="lem" id="lem-es" value="ESP">Espanhol</label>
       </span>
-      <span class="syncwrap"><span id="sync" data-mode="local">Progresso salvo neste navegador</span> <button id="xfer" class="linkbtn" type="button">Sincronizar e backup</button></span>
+      <span class="syncwrap"><span id="sync" data-mode="local">Progresso salvo neste navegador</span> <button id="xfer" class="linkbtn" type="button">Conta e sincronização</button></span>
     </div>
     <p id="forecast"></p>
     <nav class="tabs" aria-label="Seções">
@@ -4123,11 +4126,11 @@ let ref = null, writing = false, dirty = false, wTimer = null;
 function setSync(mode) {
   const el = $('#sync');
   el.dataset.mode = mode;
-  el.textContent = { local: 'Progresso salvo neste navegador', cloud: 'Progresso salvo na sua conta', saving: 'Salvando…', offline: 'Sem conexão com a conta; salvo neste navegador', gh: 'Sincronizado entre seus aparelhos', 'gh-saving': 'Sincronizando…', 'gh-off': 'Sem internet: salvo aqui e sincroniza depois', 'gh-token': 'Sincronização parada: código do GitHub recusado' }[mode];
+  el.textContent = { local: 'Progresso salvo neste navegador', cloud: 'Progresso salvo na sua conta', saving: 'Salvando…', offline: 'Sem conexão com a conta; salvo neste navegador', acc: 'Sincronizado na sua conta', 'acc-saving': 'Sincronizando…', 'acc-off': 'Sem internet: salvo aqui e sincroniza depois', 'acc-sessao': 'Entre de novo na sua conta para sincronizar' }[mode];
 }
 function touch() {
   S.t = Date.now(); saveLocal();
-  try { ghTouch(); } catch (e) {}
+  try { accTouch(); } catch (e) {}
   if (ref) { dirty = true; setSync('saving'); clearTimeout(wTimer); wTimer = setTimeout(flush, 1200); }
 }
 async function flush() {
@@ -4249,7 +4252,7 @@ function transferHTML() {
   const ic = inClaude();
   return `<section id="transferir"><h2>Salvar e levar seu progresso</h2>
 <p>Cada bolinha é salva na hora, neste navegador, sem precisar de conta nem de internet. ${ic ? 'Aqui no claude.ai ela também fica salva na sua conta.' : 'Para usar em outro aparelho ou ter uma cópia de segurança, use as opções abaixo.'}</p>
-${ghHTML()}
+${accHTML()}
 <div class="xfer">
 <div><h3>Levar para outro aparelho</h3>
 <ol><li>${ic ? 'Copie o código.' : 'Copie o link de transferência.'}</li><li>Envie para você mesmo (WhatsApp, e-mail).</li><li>${ic ? 'No outro aparelho, abra a página, vá em "Como usar" e cole o código.' : 'Abra o link no outro aparelho e escolha "Juntar".'}</li></ol>
@@ -4274,6 +4277,8 @@ async function copyText(text, okMsg) {
 function markBackup() { S.lastBackup = Date.now(); saveLocal(); }
 function backupNote() {
   if (inClaude()) return '';
+  if (fbReady() && !accOn()) return '<p class="note">Crie sua conta grátis (e-mail e senha) para ver e marcar seu progresso em qualquer aparelho. <button class="linkbtn" data-xfer>Criar conta ou entrar</button></p>';
+  if (accOn()) return '';
   const n = Object.keys(S.done).length;
   if (n < 20 || (S.lastBackup && Date.now() - S.lastBackup < 14 * 864e5)) return '';
   return '<p class="note">Você ainda não ' + (S.lastBackup ? 'faz backup há mais de 2 semanas' : 'fez um backup do progresso') + '. <button class="linkbtn" data-xfer>Fazer backup agora</button></p>';
@@ -4336,28 +4341,68 @@ function clearImportHash() { try { history.replaceState(null, '', location.href.
   } catch (err) { clearImportHash(); flash(IMPORT_ERR[err.message] || IMPORT_ERR.formato); }
 })();
 
-// ===== Sincronização automática entre aparelhos (PC, iPad, celular) pela conta do GitHub do aluno =====
-// O progresso fica num gist privado da própria conta. Cada aparelho guarda um token que só tem permissão de "gist".
-// Ao abrir ou voltar para a página, baixa; a cada mudança, envia. Vale o mais recente; se os dois aparelhos mudaram, junta.
+// ===== Conta grátis: o progresso em qualquer aparelho, com e-mail e senha =====
+// Usa o Firebase (Google) pela API REST: login com e-mail/senha e um documento por pessoa (progresso/<uid>),
+// protegido por regra para só o dono ler e gravar. Ao abrir ou voltar para a página, baixa; a cada mudança, envia.
+// Vale o mais recente; se dois aparelhos mudaram ao mesmo tempo, junta as marcações dos dois.
 // (com "var" e leitura preguiçosa: a primeira tela é desenhada pelo ui.js antes deste trecho rodar)
-var GH, ghTimer = null, ghBusy = false, ghDirty = false;
-var GH_FILE = 'cronograma-enem-2027.json';
-var GH_ERR = { rede: 'Sem internet agora. Tente de novo quando estiver conectado.', token: 'O GitHub não aceitou o código. Confira se copiou inteiro (começa com "ghp_") ou gere outro.', permissao: 'O código não tem a permissão "gist". Gere outro pelo link do passo 1, que já vem com a permissão marcada.', http: 'O GitHub não respondeu. Tente de novo em instantes.', sumiu: 'O arquivo de sincronização foi apagado no GitHub. Ative a sincronização de novo.' };
-function ghCfg() { if (GH === undefined) { try { GH = JSON.parse(localStorage.getItem('enem2027-github-sync') || 'null'); } catch (e) { GH = null; } } return GH; }
-function ghOn() { const g = ghCfg(); return !inClaude() && !!(g && g.token && g.gist); }
-function ghSave() { try { if (GH) localStorage.setItem('enem2027-github-sync', JSON.stringify(GH)); else localStorage.removeItem('enem2027-github-sync'); } catch (e) {} }
-async function ghApi(path, opts, token) {
+function fbCfg() { return { apiKey: 'AIzaSyA6g1tXvoVtFAmBFAe8aRa7WiCsG4f4wd0', projectId: 'cronograma-enem-5c10f' }; }   // configuração pública do projeto Firebase (não é senha)
+var ACC, ACC_MODE = null, accTimer = null, accBusy = false, accDirty = false;
+var ACC_ERR = { rede: 'Sem internet agora. Tente de novo quando estiver conectado.', EMAIL_EXISTS: 'Já existe uma conta com esse e-mail. Toque em "Já tenho conta" e entre.', INVALID_LOGIN_CREDENTIALS: 'E-mail ou senha incorretos.', EMAIL_NOT_FOUND: 'E-mail ou senha incorretos.', INVALID_PASSWORD: 'E-mail ou senha incorretos.', WEAK_PASSWORD: 'A senha precisa ter pelo menos 6 caracteres.', INVALID_EMAIL: 'Esse e-mail não parece válido. Confira se digitou certo.', MISSING_PASSWORD: 'Digite a senha.', MISSING_EMAIL: 'Digite o e-mail.', TOO_MANY_ATTEMPTS_TRY_LATER: 'Muitas tentativas seguidas. Espere alguns minutos e tente de novo.', USER_DISABLED: 'Essa conta foi desativada.', OPERATION_NOT_ALLOWED: 'O login por e-mail ainda não foi ativado no servidor.', sessao: 'Sua sessão expirou. Entre de novo com seu e-mail e senha.', permissao: 'O servidor recusou o acesso. Saia e entre de novo.', http: 'O servidor não respondeu. Tente de novo em instantes.' };
+function accErr(code) { return ACC_ERR[String(code || '').split(/[\s:]/)[0]] || ACC_ERR.http; }
+function fbReady() { return !!(fbCfg().apiKey && fbCfg().projectId); }
+function accCfg() { if (ACC === undefined) { try { ACC = JSON.parse(localStorage.getItem('enem2027-conta') || 'null'); } catch (e) { ACC = null; } } return ACC; }
+function accOn() { const a = accCfg(); return !inClaude() && fbReady() && !!(a && a.refresh && a.uid); }
+function accSave() { try { if (ACC) localStorage.setItem('enem2027-conta', JSON.stringify(ACC)); else localStorage.removeItem('enem2027-conta'); } catch (e) {} }
+async function fbAuth(path, body) {
   let r;
-  try { r = await fetch('https://api.github.com' + path, Object.assign({ cache: 'no-store' }, opts || {}, { headers: { Authorization: 'Bearer ' + (token || GH.token), Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' } })); }
+  try { r = await fetch('https://identitytoolkit.googleapis.com/v1/' + path + '?key=' + fbCfg().apiKey, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
   catch (e) { throw new Error('rede'); }
-  if (r.status === 401) throw new Error('token');
-  if (r.status === 404 && /^\/gists\/\w+$/.test(path)) throw new Error('sumiu');
-  if (r.status === 403 || r.status === 404) throw new Error('permissao');
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error && j.error.message) || 'http');
+  return j;
+}
+function accSession(j, email) {
+  ACC = Object.assign(ACC || {}, { email: j.email || email || (ACC && ACC.email), uid: j.localId || j.user_id || (ACC && ACC.uid), id: j.idToken || j.id_token, refresh: j.refreshToken || j.refresh_token, exp: Date.now() + ((+(j.expiresIn || j.expires_in) || 3600) - 120) * 1000 });
+  accSave();
+}
+async function accToken() {
+  if (ACC.id && Date.now() < (ACC.exp || 0)) return ACC.id;
+  let r;
+  try { r = await fetch('https://securetoken.googleapis.com/v1/token?key=' + fbCfg().apiKey, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(ACC.refresh) }); }
+  catch (e) { throw new Error('rede'); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(r.status === 400 || r.status === 401 || r.status === 403 ? 'sessao' : 'http');
+  accSession(j);
+  return ACC.id;
+}
+async function fbDoc(method, body) {
+  const url = 'https://firestore.googleapis.com/v1/projects/' + fbCfg().projectId + '/databases/(default)/documents/progresso/' + ACC.uid;
+  const go = async () => {
+    const tok = await accToken();
+    try { return await fetch(url, { method, cache: 'no-store', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); }
+    catch (e) { throw new Error('rede'); }
+  };
+  let r = await go();
+  if (r.status === 401) { ACC.exp = 0; r = await go(); }
+  if (r.status === 404 && method === 'GET') return null;
+  if (r.status === 401 || r.status === 403) throw new Error('permissao');
   if (!r.ok) throw new Error('http');
   return r.json();
 }
-// cada navegador recebe uma identidade, para a lista "aparelhos sincronizados" (o app da tela de início do iPad e o Safari contam separado)
-function ghDevice() {
+async function accRead() {
+  const d = await fbDoc('GET');
+  const s = d && d.fields && d.fields.json && d.fields.json.stringValue;
+  if (!s) return null;
+  try { const o = JSON.parse(s); return o && o.done ? o : null; } catch (e) { return null; }
+}
+async function accWrite() {
+  const st = syncState();
+  await fbDoc('PATCH', { fields: { json: { stringValue: JSON.stringify(st) } } });
+  ACC.devices = st.devices; ACC.seen = S.t; ACC.at = Date.now(); accSave();
+}
+// cada navegador recebe uma identidade, para a lista "aparelhos conectados" (o app da tela de início do iPad e o Safari contam separado)
+function syncDevice() {
   let id = 'x';
   try { id = localStorage.getItem('enem2027-aparelho') || ''; if (!id) { id = Math.random().toString(36).slice(2, 10); localStorage.setItem('enem2027-aparelho', id); } } catch (e) {}
   const ua = navigator.userAgent || '';
@@ -4365,127 +4410,121 @@ function ghDevice() {
   const app = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone;
   return { id, name: name + (app ? ', app da tela de início' : ', navegador') };
 }
-function ghState() {
-  const me = ghDevice();
-  return { app: 'cronograma-enem-2027', v: 2, start: S.start, exam: S.exam, lem: S.lem, t: S.t, done: S.done, quiz: S.quiz || [], devices: Object.assign({}, (GH && GH.devices) || {}, { [me.id]: { name: me.name, at: Date.now() } }) };
+function syncState() {
+  const me = syncDevice();
+  return { app: 'cronograma-enem-2027', v: 2, start: S.start, exam: S.exam, lem: S.lem, t: S.t, done: S.done, quiz: S.quiz || [], devices: Object.assign({}, (ACC && ACC.devices) || {}, { [me.id]: { name: me.name, at: Date.now() } }) };
 }
-// precisa avisar ao arquivo que este aparelho existe (primeira vez ou mais de 12 h sem registrar)
-function ghStale(r) { const d = r && r.devices && r.devices[ghDevice().id]; return !d || Date.now() - (d.at || 0) > 432e5; }
-function ghQuiz(a, b) {
+// precisa avisar ao servidor que este aparelho existe (primeira vez ou mais de 12 h sem registrar)
+function syncStale(r) { const d = r && r.devices && r.devices[syncDevice().id]; return !d || Date.now() - (d.at || 0) > 432e5; }
+function syncQuiz(a, b) {
   const m = new Map();
   (a || []).concat(b || []).forEach(q => m.set([q.d, (q.topics || []).join('|'), q.pts, q.max].join('#'), q));
   return [...m.values()].sort((x, y) => (x.d < y.d ? -1 : x.d > y.d ? 1 : 0)).slice(-40);
 }
-async function ghRead() {
-  const g = await ghApi('/gists/' + GH.gist);
-  const f = g.files && g.files[GH_FILE];
-  if (!f) return null;
-  let c = f.content;
-  if (f.truncated && f.raw_url) c = await (await fetch(f.raw_url, { cache: 'no-store' })).text();
-  try { const o = JSON.parse(c); return o && o.done ? o : null; } catch (e) { return null; }
-}
-async function ghWrite() {
-  const st = ghState();
-  await ghApi('/gists/' + GH.gist, { method: 'PATCH', body: JSON.stringify({ files: { [GH_FILE]: { content: JSON.stringify(st) } } }) });
-  GH.devices = st.devices; GH.seen = S.t; GH.at = Date.now(); ghSave();
-}
-// o outro aparelho gravou e este não mudou nada: adota a versão de lá
-function ghAdopt(r) {
-  S = Object.assign({}, S, { start: r.start || S.start, exam: r.exam || S.exam, lem: r.lem || S.lem, done: Object.assign({}, r.done || {}), quiz: ghQuiz(S.quiz, r.quiz), t: r.t });
+// outro aparelho gravou e este não mudou nada: adota a versão de lá
+function syncAdopt(r) {
+  S = Object.assign({}, S, { start: r.start || S.start, exam: r.exam || S.exam, lem: r.lem || S.lem, done: Object.assign({}, r.done || {}), quiz: syncQuiz(S.quiz, r.quiz), t: r.t });
   saveLocal(); cur = null; render();
 }
 // os dois aparelhos mudaram desde a última sincronização: junta as marcações dos dois
-function ghUnion(r) {
+function syncUnion(r) {
   const done = Object.assign({}, r.done || {});
   Object.entries(S.done).forEach(([k, v]) => { done[k] = done[k] ? Math.min(done[k], v) : v; });
   const newer = (r.t || 0) > (S.t || 0);
-  S = Object.assign({}, S, { start: r.start && r.start < S.start ? r.start : S.start, exam: newer && r.exam ? r.exam : S.exam, lem: newer && r.lem ? r.lem : S.lem, done, quiz: ghQuiz(S.quiz, r.quiz), t: Math.max(S.t || 0, r.t || 0) + 1 });
+  S = Object.assign({}, S, { start: r.start && r.start < S.start ? r.start : S.start, exam: newer && r.exam ? r.exam : S.exam, lem: newer && r.lem ? r.lem : S.lem, done, quiz: syncQuiz(S.quiz, r.quiz), t: Math.max(S.t || 0, r.t || 0) + 1 });
   saveLocal(); cur = null; render();
 }
-async function ghSync() {
-  if (!ghOn()) return;
-  if (ghBusy) { ghDirty = true; return; }
-  ghBusy = true; ghDirty = false; setSync('gh-saving');
+async function accSync() {
+  if (!accOn()) return;
+  if (accBusy) { accDirty = true; return; }
+  accBusy = true; accDirty = false; setSync('acc-saving');
   try {
-    const r = await ghRead(), seen = GH.seen || 0, rt = r ? r.t || 0 : 0;
-    if (r) GH.devices = r.devices || {};
-    const remoteChanged = !!r && rt !== seen, localChanged = (S.t || 0) !== seen, stale = ghStale(r);
-    if (remoteChanged && localChanged) { ghUnion(r); await ghWrite(); }
-    else if (remoteChanged) { ghAdopt(r); GH.seen = rt; GH.at = Date.now(); ghSave(); if (stale) await ghWrite(); }
-    else if (!r || localChanged || stale) await ghWrite();
-    else { GH.at = Date.now(); ghSave(); }
-    setSync('gh');
+    const r = await accRead(), seen = ACC.seen || 0, rt = r ? r.t || 0 : 0;
+    if (r) ACC.devices = r.devices || {};
+    const remoteChanged = !!r && rt !== seen, localChanged = (S.t || 0) !== seen, stale = syncStale(r);
+    if (remoteChanged && localChanged) { syncUnion(r); await accWrite(); }
+    else if (remoteChanged) { syncAdopt(r); ACC.seen = rt; ACC.at = Date.now(); accSave(); if (stale) await accWrite(); }
+    else if (!r || localChanged || stale) await accWrite();
+    else { ACC.at = Date.now(); accSave(); }
+    setSync('acc');
   } catch (e) {
-    setSync(e.message === 'token' || e.message === 'permissao' ? 'gh-token' : 'gh-off');
-    if (e.message === 'sumiu') { GH.gist = null; ghSave(); setSync('local'); }
+    if (e.message === 'sessao' || e.message === 'permissao') { ACC = { email: ACC.email }; accSave(); setSync('acc-sessao'); if (view === 'metodo') render(); }
+    else setSync('acc-off');
   }
-  ghBusy = false;
-  if (ghDirty) ghSync();
+  accBusy = false;
+  if (accDirty) accSync();
 }
-function ghTouch() { if (!ghOn()) return; setSync('gh-saving'); clearTimeout(ghTimer); ghTimer = setTimeout(() => { ghTimer = null; ghSync(); }, 2000); }
-async function ghConnect(token) {
-  const list = await ghApi('/gists?per_page=100', null, token);
-  const found = (list || []).find(g => g.files && g.files[GH_FILE]);
-  GH = { token, gist: found ? found.id : null, seen: 0, at: 0 };
-  if (!GH.gist) {
-    if (!S.t) S.t = Date.now();
-    const st = ghState();
-    const g = await ghApi('/gists', { method: 'POST', body: JSON.stringify({ description: 'Progresso do Cronograma ENEM 2027 (sincronização automática entre aparelhos)', public: false, files: { [GH_FILE]: { content: JSON.stringify(st) } } }) }, token);
-    GH.gist = g.id; GH.devices = st.devices; GH.seen = S.t; GH.at = Date.now(); ghSave(); saveLocal();
-    return 'Sincronização ativada. Agora faça o mesmo no iPad com o mesmo código.';
-  }
-  ghSave();
-  const before = Object.keys(S.done).length, r = await ghRead();
-  if (r) { GH.devices = r.devices || {}; ghUnion(r); }
-  await ghWrite();
-  return 'Sincronização ativada e progresso dos aparelhos juntado (' + Math.max(0, Object.keys(S.done).length - before) + ' tarefas vieram do outro aparelho).';
+function accTouch() { if (!accOn()) return; setSync('acc-saving'); clearTimeout(accTimer); accTimer = setTimeout(() => { accTimer = null; accSync(); }, 2000); }
+async function accEnter(mode, email, pass) {
+  const j = await fbAuth(mode === 'nova' ? 'accounts:signUp' : 'accounts:signInWithPassword', { email, password: pass, returnSecureToken: true });
+  ACC = { seen: 0, at: 0 };
+  accSession(j, email);
+  const before = Object.keys(S.done).length, r = await accRead();
+  if (r) { ACC.devices = r.devices || {}; syncUnion(r); }
+  else if (!S.t) S.t = Date.now();
+  await accWrite();
+  const got = Object.keys(S.done).length - before;
+  return mode === 'nova' ? 'Conta criada! Agora, em qualquer aparelho, abra o site, toque em "Conta e sincronização" e entre com este e-mail e esta senha.' : 'Pronto, você entrou.' + (got > 0 ? ' ' + got + ' tarefas vieram dos seus outros aparelhos.' : ' Seu progresso está sincronizado.');
 }
-function ghHTML() {
-  if (inClaude()) return '';
-  if (ghOn()) {
-    const me = ghDevice().id, when = t => new Date(t).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-    const devs = Object.entries(GH.devices || {}).sort((a, b) => (b[1].at || 0) - (a[1].at || 0));
+function accHTML() {
+  if (inClaude() || !fbReady()) return '';
+  if (accOn()) {
+    const me = syncDevice().id, when = t => new Date(t).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+    const devs = Object.entries(ACC.devices || {}).sort((a, b) => (b[1].at || 0) - (a[1].at || 0));
     const list = devs.length ? '<ul class="ghdevs">' + devs.map(([id, d]) => '<li><b>' + esc(d.name || 'Aparelho') + '</b>' + (id === me ? ' (este aparelho)' : '') + ' · registrado em ' + when(d.at || 0) + '</li>').join('') + '</ul>' : '';
-    const alone = devs.length < 2 ? '<p class="note">Só este aparelho está ligado até agora. No outro aparelho, abra o cronograma (no iPad, pelo ícone da tela de início), toque em "Sincronizar e backup" e cole o mesmo código. Use o botão abaixo para copiar o código.</p>' : '';
-    return `<div class="ghsync"><h3>Sincronização entre aparelhos</h3><p><b>Ativa neste aparelho.</b> Tudo o que você marcar aqui aparece nos outros aparelhos em poucos segundos (ao abrir ou voltar para a página). Última sincronização: ${GH.at ? when(GH.at) : 'agora'}.</p><p>Aparelhos ligados a esta sincronização:</p>${list}${alone}<div class="xbtns"><button class="btn" id="gh-now" type="button">Sincronizar agora</button><button class="btn ghost" id="gh-copy" type="button">Copiar o código para outro aparelho</button><button class="btn ghost" id="gh-stop" type="button">Desligar neste aparelho</button></div></div>`;
+    const alone = devs.length < 2 ? '<p class="note">Só este aparelho entrou até agora. Nos outros (iPad, celular, outro computador), abra o site, toque em "Conta e sincronização" e entre com o mesmo e-mail e senha.</p>' : '';
+    return `<div class="ghsync" id="conta"><h3>Sua conta</h3><p>Conectado como <b>${esc(ACC.email || '')}</b>. Tudo o que você marcar aparece nos seus outros aparelhos em poucos segundos (ao abrir ou voltar para a página). Última sincronização: ${ACC.at ? when(ACC.at) : 'agora'}.</p><p>Aparelhos conectados:</p>${list}${alone}<div class="xbtns"><button class="btn" id="acc-now" type="button">Sincronizar agora</button><button class="btn ghost" id="acc-out" type="button">Sair da conta neste aparelho</button></div></div>`;
   }
-  return `<div class="ghsync"><h3>Sincronizar PC e iPad automaticamente</h3>
-<p>Configure uma vez em cada aparelho. Depois disso, o que você marcar no PC aparece no iPad e vice-versa, sozinho. O progresso fica guardado num arquivo privado da sua conta do GitHub.</p>
-<ol class="steps">
-<li>Abra <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=Cronograma%20ENEM%202027" target="_blank" rel="noopener">este link do GitHub</a> (já vem com a permissão certa marcada, só "gist").</li>
-<li>Em <b>Expiration</b>, escolha <b>No expiration</b>. Desça até o fim e clique em <b>Generate token</b>.</li>
-<li>Copie o código que aparece (começa com "ghp_"; o GitHub só mostra uma vez) e cole aqui:</li>
-</ol>
-<div class="qzkey"><input type="password" id="gh-token" autocomplete="off" placeholder="Cole aqui o código ghp_…" aria-label="Código do GitHub"><button class="btn" type="button" id="gh-save">Ativar sincronização</button></div>
-<p class="small">No iPad: abra o cronograma pelo ícone da tela de início, toque em "Sincronizar e backup" e cole o mesmo código. Para levar o código até o iPad, mande para você mesmo (Notas, WhatsApp ou e-mail) e apague a mensagem depois.</p>
-<p class="small">O código só dá acesso aos gists (anotações) da sua conta, nada além disso. Não mostre para ninguém.</p></div>`;
+  const a = accCfg() || {}, mode = ACC_MODE || (a.email ? 'entrar' : 'nova'), nova = mode === 'nova';
+  return `<div class="ghsync" id="conta"><h3>Sua conta grátis: seu progresso em qualquer aparelho</h3>
+<p>Crie uma conta com seu e-mail e uma senha. Depois é só entrar com os mesmos dados no celular, no tablet ou em outro computador: o que você marcar aparece em todos, sozinho.</p>
+<div class="xbtns accmodes"><button class="btn sm${nova ? '' : ' ghost'}" type="button" data-accmode="nova" aria-pressed="${nova}">Criar conta</button><button class="btn sm${nova ? ' ghost' : ''}" type="button" data-accmode="entrar" aria-pressed="${!nova}">Já tenho conta</button></div>
+<form id="acc-form" class="accform" novalidate>
+<label>E-mail <input type="email" id="acc-email" name="email" autocomplete="username" inputmode="email" autocapitalize="off" spellcheck="false" value="${esc(a.email || '')}"></label>
+<label>Senha <input type="password" id="acc-pass" name="password" autocomplete="${nova ? 'new-password' : 'current-password'}" placeholder="${nova ? 'Pelo menos 6 caracteres' : ''}"></label>
+<div class="xbtns"><button class="btn" type="submit" id="acc-go">${nova ? 'Criar conta' : 'Entrar'}</button>${nova ? '' : '<button class="linkbtn" type="button" id="acc-forgot">Esqueci a senha</button>'}</div>
+</form>
+<p class="small">${nova ? 'Se este aparelho já tem progresso marcado, ele vai junto para a sua conta.' : 'O progresso deste aparelho é somado ao da sua conta.'} Anote o e-mail e a senha: são eles que abrem seu cronograma em outros aparelhos.</p></div>`;
 }
 document.addEventListener('click', async e => {
-  const t = e.target.closest('#gh-save, #gh-now, #gh-stop, #gh-copy');
+  const t = e.target.closest('[data-accmode], #acc-now, #acc-out, #acc-forgot');
   if (!t) return;
-  if (t.id === 'gh-copy') { copyText(GH.token, 'Código copiado. Mande para você mesmo (Notas, WhatsApp ou e-mail), cole no outro aparelho e depois apague a mensagem.'); return; }
-  if (t.id === 'gh-save') {
-    const token = ((document.getElementById('gh-token') || {}).value || '').trim().replace(/\s+/g, '');
-    if (token.length < 20) { xmsg('Cole o código inteiro (começa com "ghp_").', true); return; }
-    t.disabled = true; t.textContent = 'Ativando…';
-    try { const msg = await ghConnect(token); setSync('gh'); goTransfer(); xmsg(msg); }
-    catch (err) { GH = null; ghSave(); t.disabled = false; t.textContent = 'Ativar sincronização'; xmsg(GH_ERR[err.message] || GH_ERR.http, true); }
-  } else if (t.id === 'gh-now') {
-    await ghSync(); goTransfer();
-    const m = document.getElementById('sync'); xmsg(m && m.dataset.mode === 'gh' ? 'Sincronizado agora.' : 'Não consegui sincronizar: ' + (m ? m.textContent : '') + '.', !(m && m.dataset.mode === 'gh'));
-  } else if (t.id === 'gh-stop') {
-    GH = null; ghSave(); setSync('local'); goTransfer(); xmsg('Sincronização desligada neste aparelho. O progresso continua salvo aqui.');
+  if (t.dataset.accmode) { ACC_MODE = t.dataset.accmode; const em = (document.getElementById('acc-email') || {}).value; if (em) { ACC = Object.assign(accCfg() || {}, { email: em }); } goTransfer(); const f = document.getElementById(em ? 'acc-pass' : 'acc-email'); if (f) f.focus(); return; }
+  if (t.id === 'acc-now') {
+    await accSync(); goTransfer();
+    const m = document.getElementById('sync'), ok = m && m.dataset.mode === 'acc';
+    xmsg(ok ? 'Sincronizado agora.' : 'Não consegui sincronizar: ' + (m ? m.textContent : '') + '.', !ok);
+  } else if (t.id === 'acc-out') {
+    ACC = { email: ACC.email }; accSave(); ACC_MODE = 'entrar'; setSync('local'); goTransfer();
+    xmsg('Você saiu da conta neste aparelho. O progresso continua salvo aqui e na sua conta.');
+  } else if (t.id === 'acc-forgot') {
+    const email = ((document.getElementById('acc-email') || {}).value || '').trim();
+    if (!email) { xmsg('Digite seu e-mail no campo acima e toque de novo em "Esqueci a senha".', true); return; }
+    try { await fbAuth('accounts:sendOobCode', { requestType: 'PASSWORD_RESET', email }); xmsg('Se existir uma conta com ' + email + ', chegou um e-mail com um link para criar uma senha nova (veja também o spam).'); }
+    catch (err) { xmsg(accErr(err.message), true); }
   }
 });
+document.addEventListener('submit', async e => {
+  if (e.target.id !== 'acc-form') return;
+  e.preventDefault();
+  const email = (document.getElementById('acc-email').value || '').trim(), pass = document.getElementById('acc-pass').value || '';
+  const mode = ACC_MODE || ((accCfg() || {}).email ? 'entrar' : 'nova');
+  if (!email) { xmsg(ACC_ERR.MISSING_EMAIL, true); return; }
+  if (!pass) { xmsg(ACC_ERR.MISSING_PASSWORD, true); return; }
+  if (mode === 'nova' && pass.length < 6) { xmsg(ACC_ERR.WEAK_PASSWORD, true); return; }
+  const b = document.getElementById('acc-go'); b.disabled = true; b.textContent = mode === 'nova' ? 'Criando…' : 'Entrando…';
+  try { const msg = await accEnter(mode, email, pass); ACC_MODE = null; setSync('acc'); goTransfer(); xmsg(msg); }
+  catch (err) { if (accOn()) { ACC = { email }; accSave(); } b.disabled = false; b.textContent = mode === 'nova' ? 'Criar conta' : 'Entrar'; xmsg(accErr(err.message), true); }
+});
 if (!inClaude()) {
-  if (ghOn()) setTimeout(ghSync, 500);
+  if (accOn()) setTimeout(accSync, 500);
   document.addEventListener('visibilitychange', () => {
-    if (!ghOn()) return;
-    if (document.hidden) { if (ghTimer) { clearTimeout(ghTimer); ghTimer = null; ghSync(); } }
-    else ghSync();
+    if (!accOn()) return;
+    if (document.hidden) { if (accTimer) { clearTimeout(accTimer); accTimer = null; accSync(); } }
+    else accSync();
   });
-  window.addEventListener('online', () => { if (ghOn()) ghSync(); });
-  setInterval(() => { if (ghOn() && !document.hidden) ghSync(); }, 120000);
+  window.addEventListener('online', () => { if (accOn()) accSync(); });
+  setInterval(() => { if (accOn() && !document.hidden) accSync(); }, 120000);
 }
 
 // pede ao navegador para não apagar os dados desta página
