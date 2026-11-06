@@ -76,6 +76,7 @@ h1 { margin: 2px 0 0; font-family: var(--display); font-stretch: 72%; font-weigh
 #sync[data-mode=gh-token]::before { content: "○ "; color: var(--mt); }
 .ghsync { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 0 0 16px; }
 .ghsync h3 { margin-top: 0; }
+.ghdevs { margin: 4px 0 10px; padding-left: 20px; font-size: 14.5px; }
 .tabs { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
 .tabs button { font: inherit; font-family: var(--display); font-stretch: 85%; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; font-size: 15px; background: none; border: 0; border-bottom: 3px solid transparent; color: var(--ink2); padding: 8px 14px 9px; cursor: pointer; white-space: nowrap; }
 .tabs button[aria-selected=true] { color: var(--ink); border-bottom-color: var(--ink); }
@@ -4355,7 +4356,21 @@ async function ghApi(path, opts, token) {
   if (!r.ok) throw new Error('http');
   return r.json();
 }
-function ghState() { return { app: 'cronograma-enem-2027', v: 2, start: S.start, exam: S.exam, lem: S.lem, t: S.t, done: S.done, quiz: S.quiz || [] }; }
+// cada navegador recebe uma identidade, para a lista "aparelhos sincronizados" (o app da tela de início do iPad e o Safari contam separado)
+function ghDevice() {
+  let id = 'x';
+  try { id = localStorage.getItem('enem2027-aparelho') || ''; if (!id) { id = Math.random().toString(36).slice(2, 10); localStorage.setItem('enem2027-aparelho', id); } } catch (e) {}
+  const ua = navigator.userAgent || '';
+  const name = /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? 'iPad' : /iPhone/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'PC (Windows)' : /Macintosh/.test(ua) ? 'Mac' : 'Outro aparelho';
+  const app = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone;
+  return { id, name: name + (app ? ', app da tela de início' : ', navegador') };
+}
+function ghState() {
+  const me = ghDevice();
+  return { app: 'cronograma-enem-2027', v: 2, start: S.start, exam: S.exam, lem: S.lem, t: S.t, done: S.done, quiz: S.quiz || [], devices: Object.assign({}, (GH && GH.devices) || {}, { [me.id]: { name: me.name, at: Date.now() } }) };
+}
+// precisa avisar ao arquivo que este aparelho existe (primeira vez ou mais de 12 h sem registrar)
+function ghStale(r) { const d = r && r.devices && r.devices[ghDevice().id]; return !d || Date.now() - (d.at || 0) > 432e5; }
 function ghQuiz(a, b) {
   const m = new Map();
   (a || []).concat(b || []).forEach(q => m.set([q.d, (q.topics || []).join('|'), q.pts, q.max].join('#'), q));
@@ -4370,8 +4385,9 @@ async function ghRead() {
   try { const o = JSON.parse(c); return o && o.done ? o : null; } catch (e) { return null; }
 }
 async function ghWrite() {
-  await ghApi('/gists/' + GH.gist, { method: 'PATCH', body: JSON.stringify({ files: { [GH_FILE]: { content: JSON.stringify(ghState()) } } }) });
-  GH.seen = S.t; GH.at = Date.now(); ghSave();
+  const st = ghState();
+  await ghApi('/gists/' + GH.gist, { method: 'PATCH', body: JSON.stringify({ files: { [GH_FILE]: { content: JSON.stringify(st) } } }) });
+  GH.devices = st.devices; GH.seen = S.t; GH.at = Date.now(); ghSave();
 }
 // o outro aparelho gravou e este não mudou nada: adota a versão de lá
 function ghAdopt(r) {
@@ -4392,10 +4408,11 @@ async function ghSync() {
   ghBusy = true; ghDirty = false; setSync('gh-saving');
   try {
     const r = await ghRead(), seen = GH.seen || 0, rt = r ? r.t || 0 : 0;
-    const remoteChanged = !!r && rt !== seen, localChanged = (S.t || 0) !== seen;
+    if (r) GH.devices = r.devices || {};
+    const remoteChanged = !!r && rt !== seen, localChanged = (S.t || 0) !== seen, stale = ghStale(r);
     if (remoteChanged && localChanged) { ghUnion(r); await ghWrite(); }
-    else if (remoteChanged) { ghAdopt(r); GH.seen = rt; GH.at = Date.now(); ghSave(); }
-    else if (!r || localChanged) await ghWrite();
+    else if (remoteChanged) { ghAdopt(r); GH.seen = rt; GH.at = Date.now(); ghSave(); if (stale) await ghWrite(); }
+    else if (!r || localChanged || stale) await ghWrite();
     else { GH.at = Date.now(); ghSave(); }
     setSync('gh');
   } catch (e) {
@@ -4412,19 +4429,26 @@ async function ghConnect(token) {
   GH = { token, gist: found ? found.id : null, seen: 0, at: 0 };
   if (!GH.gist) {
     if (!S.t) S.t = Date.now();
-    const g = await ghApi('/gists', { method: 'POST', body: JSON.stringify({ description: 'Progresso do Cronograma ENEM 2027 (sincronização automática entre aparelhos)', public: false, files: { [GH_FILE]: { content: JSON.stringify(ghState()) } } }) }, token);
-    GH.gist = g.id; GH.seen = S.t; GH.at = Date.now(); ghSave(); saveLocal();
+    const st = ghState();
+    const g = await ghApi('/gists', { method: 'POST', body: JSON.stringify({ description: 'Progresso do Cronograma ENEM 2027 (sincronização automática entre aparelhos)', public: false, files: { [GH_FILE]: { content: JSON.stringify(st) } } }) }, token);
+    GH.gist = g.id; GH.devices = st.devices; GH.seen = S.t; GH.at = Date.now(); ghSave(); saveLocal();
     return 'Sincronização ativada. Agora faça o mesmo no iPad com o mesmo código.';
   }
   ghSave();
   const before = Object.keys(S.done).length, r = await ghRead();
-  if (r) ghUnion(r);
+  if (r) { GH.devices = r.devices || {}; ghUnion(r); }
   await ghWrite();
   return 'Sincronização ativada e progresso dos aparelhos juntado (' + Math.max(0, Object.keys(S.done).length - before) + ' tarefas vieram do outro aparelho).';
 }
 function ghHTML() {
   if (inClaude()) return '';
-  if (ghOn()) return `<div class="ghsync"><h3>Sincronização entre aparelhos</h3><p><b>Ativa neste aparelho.</b> Tudo o que você marcar aqui aparece no outro aparelho em poucos segundos (ao abrir ou voltar para a página). Última sincronização: ${GH.at ? new Date(GH.at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : 'agora'}.</p><div class="xbtns"><button class="btn" id="gh-now" type="button">Sincronizar agora</button><button class="btn ghost" id="gh-stop" type="button">Desligar neste aparelho</button></div></div>`;
+  if (ghOn()) {
+    const me = ghDevice().id, when = t => new Date(t).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+    const devs = Object.entries(GH.devices || {}).sort((a, b) => (b[1].at || 0) - (a[1].at || 0));
+    const list = devs.length ? '<ul class="ghdevs">' + devs.map(([id, d]) => '<li><b>' + esc(d.name || 'Aparelho') + '</b>' + (id === me ? ' (este aparelho)' : '') + ' · registrado em ' + when(d.at || 0) + '</li>').join('') + '</ul>' : '';
+    const alone = devs.length < 2 ? '<p class="note">Só este aparelho está ligado até agora. No outro aparelho, abra o cronograma (no iPad, pelo ícone da tela de início), toque em "Sincronizar e backup" e cole o mesmo código. Use o botão abaixo para copiar o código.</p>' : '';
+    return `<div class="ghsync"><h3>Sincronização entre aparelhos</h3><p><b>Ativa neste aparelho.</b> Tudo o que você marcar aqui aparece nos outros aparelhos em poucos segundos (ao abrir ou voltar para a página). Última sincronização: ${GH.at ? when(GH.at) : 'agora'}.</p><p>Aparelhos ligados a esta sincronização:</p>${list}${alone}<div class="xbtns"><button class="btn" id="gh-now" type="button">Sincronizar agora</button><button class="btn ghost" id="gh-copy" type="button">Copiar o código para outro aparelho</button><button class="btn ghost" id="gh-stop" type="button">Desligar neste aparelho</button></div></div>`;
+  }
   return `<div class="ghsync"><h3>Sincronizar PC e iPad automaticamente</h3>
 <p>Configure uma vez em cada aparelho. Depois disso, o que você marcar no PC aparece no iPad e vice-versa, sozinho. O progresso fica guardado num arquivo privado da sua conta do GitHub.</p>
 <ol class="steps">
@@ -4437,8 +4461,9 @@ function ghHTML() {
 <p class="small">O código só dá acesso aos gists (anotações) da sua conta, nada além disso. Não mostre para ninguém.</p></div>`;
 }
 document.addEventListener('click', async e => {
-  const t = e.target.closest('#gh-save, #gh-now, #gh-stop');
+  const t = e.target.closest('#gh-save, #gh-now, #gh-stop, #gh-copy');
   if (!t) return;
+  if (t.id === 'gh-copy') { copyText(GH.token, 'Código copiado. Mande para você mesmo (Notas, WhatsApp ou e-mail), cole no outro aparelho e depois apague a mensagem.'); return; }
   if (t.id === 'gh-save') {
     const token = ((document.getElementById('gh-token') || {}).value || '').trim().replace(/\s+/g, '');
     if (token.length < 20) { xmsg('Cole o código inteiro (começa com "ghp_").', true); return; }
