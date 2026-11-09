@@ -223,6 +223,29 @@ main { padding-block: 22px 96px; }
 .wkday.gap { border-style: dashed; }
 .wkday.future { background: var(--sheet); }
 .aula { font-size: 12.5px; font-weight: 700; }
+.note.recent, .note.backs { font-size: 14.5px; }
+.note.studied .kind { margin: 0; }
+
+/* aba aulas */
+[hidden] { display: none !important; }
+.aulas-top { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin: 0 0 10px; }
+.aulas-top input { flex: 1 1 280px; min-width: 0; font: inherit; font-size: 16px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--sheet); color: var(--ink); }
+.anums { font-family: var(--mono); font-size: 13px; color: var(--ink2); font-variant-numeric: tabular-nums; }
+.lgroup { flex-wrap: wrap; gap: 0 10px; }
+.lgroup span { white-space: nowrap; }
+.lrows { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.lrow { font: inherit; text-align: left; width: 100%; display: grid; grid-template-columns: 80px minmax(0, 1fr) auto; grid-template-areas: "n t s" "n t b"; gap: 2px 14px; align-items: start; background: var(--sheet); color: var(--ink); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 8px; padding: 9px 12px; cursor: pointer; }
+.lrow:hover { border-color: var(--ink2); }
+.lrow.st-done { border-left-color: var(--ok); }
+.lrow.st-prog, .lrow.st-today { border-left-color: var(--pen); }
+.lrn { grid-area: n; font-family: var(--display); font-stretch: 80%; font-weight: 800; font-size: 18px; line-height: 1.2; text-transform: uppercase; white-space: nowrap; }
+.lrt { grid-area: t; min-width: 0; font-size: 13.5px; line-height: 1.4; color: var(--ink2); }
+.lrt > span:not(:last-child)::after { content: " · "; color: var(--line); }
+.lrt b { color: var(--c); font-weight: 700; }
+.lrs { grid-area: s; font-family: var(--mono); font-size: 12px; white-space: nowrap; color: var(--ink2); text-align: right; }
+.st-done .lrs { color: var(--ok); }
+.st-prog .lrs, .st-today .lrs { color: var(--pen); }
+.lrow .mini { grid-area: b; width: 96px; justify-self: end; align-self: end; }
 
 /* metodologia */
 .toc { display: flex; flex-wrap: wrap; gap: 6px; background: transparent !important; border: 0 !important; padding: 0 !important; }
@@ -320,6 +343,8 @@ main { padding-block: 22px 96px; }
   #sync { margin-left: 0; width: 100%; }
   .block { padding: 12px 12px 10px; }
   .dayhead { grid-template-columns: auto 1fr auto; gap: 8px; }
+  .lrow { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "n s" "t t" "b b"; }
+  .lrow .mini { width: 100%; margin-top: 4px; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -349,6 +374,7 @@ main { padding-block: 22px 96px; }
     <p id="forecast"></p>
     <nav class="tabs" aria-label="Seções">
       <button data-view="hoje" aria-selected="true">Hoje</button>
+      <button data-view="aulas">Aulas</button>
       <button data-view="semanas">Semanas</button>
       <button data-view="exercicios">Exercícios</button>
       <button data-view="materias">Matérias e fontes</button>
@@ -3714,8 +3740,13 @@ function snapMonday(d) { const x = new Date(d); x.setDate(x.getDate() - (x.getDa
 const LS_KEY = 'enem2027-cronograma-v2';
 let S = { start: toISO(new Date()), exam: '2027-11-07', lem: 'ING', done: {}, t: 0 };
 try { const raw = localStorage.getItem(LS_KEY); if (raw) S = Object.assign(S, JSON.parse(raw)); else localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {}
-let view = 'hoje', cur = null; // cur: {dn} um dia do calendário ou {li} uma aula aberta para adiantar
-try { const h = location.hash.replace('#', ''); if (['hoje','semanas','exercicios','materias','metodologia','metodo'].includes(h)) view = h; } catch (e) {}
+let view = 'hoje', cur = null; // cur: {dn} um dia do calendário ou {li} uma aula aberta (anterior, de hoje ou adiantada)
+try {
+  const h = location.hash.replace('#', ''), m = /^aula-(\d+)$/.exec(h);
+  if (['hoje','aulas','semanas','exercicios','materias','metodologia','metodo'].includes(h)) view = h;
+  else if (m) { view = 'aulas'; cur = { li: Math.min(NL, Math.max(1, +m[1])) - 1 }; }
+} catch (e) {}
+function setHash(h) { try { history.replaceState(null, '', '#' + h); } catch (e) {} }
 function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) {} }
 const deadlineDn = () => { const e = fromISO(S.exam); return dnOf(new Date(e.getFullYear(), e.getMonth() - 1, e.getDate())); };
 
@@ -3744,11 +3775,12 @@ function buildSchedule() {
     return { L, total: its.length, n, complete, doneDn: complete ? mx : null, days };
   });
   const cal = new Map();
-  const ensure = dn => { if (!cal.has(dn)) cal.set(dn, { dn, dow: dowOf(dn), lessons: [], partial: [], adv: [] }); return cal.get(dn); };
+  const ensure = dn => { if (!cal.has(dn)) cal.set(dn, { dn, dow: dowOf(dn), lessons: [], worked: [], adv: [] }); return cal.get(dn); };
   const lessonDn = new Array(NL).fill(null);
   info.forEach(x => {
     if (x.complete && x.doneDn < pivot) { lessonDn[x.L.li] = x.doneDn; if (x.doneDn >= startDn) ensure(x.doneDn).lessons.push(x.L); }
-    else if (!x.complete) x.days.forEach(d => { if (d >= startDn && d < pivot) ensure(d).partial.push(x.L); });
+    // todo dia em que alguma tarefa da aula foi marcada (aula concluída em vários dias aparece em todos eles)
+    x.days.forEach(d => ensure(d).worked.push(x.L));
   });
   const pending = info.filter(x => !(x.complete && x.doneDn < pivot));
   let qi = 0, dn = pivot, guard = 0, endDn = null, todayLi = null;
@@ -3790,7 +3822,7 @@ function buildSchedule() {
   SCH = { startDn, monDn, tDn, pivot, cal, info, lessonDn, endDn, weeks, todayLi, nextPending: nextPending ? nextPending.L.li : null, behind: Math.max(0, Math.min(expected, NL) - doneCount), doneCount };
   return SCH;
 }
-const entryOf = dn => SCH.cal.get(dn) || { dn, dow: dowOf(dn), lessons: [], partial: [], adv: [] };
+const entryOf = dn => SCH.cal.get(dn) || { dn, dow: dowOf(dn), lessons: [], worked: [], adv: [] };
 const weekOf = dn => Math.floor((dn - SCH.monDn) / 7);
 function modsOfWeekC(c) { const w = SCH.weeks[c]; const out = []; if (w) w.lessons.forEach(L => modsOfLesson(L).forEach(m => { if (!out.includes(m)) out.push(m); })); return bySubject(out); }
 
@@ -3886,41 +3918,123 @@ function lessonHTML(L, label) {
   return '<section class="lesson"><div class="lhead"><span class="lnum">Aula ' + (L.li + 1) + ' de ' + NL + '</span><span class="lmeta">Semana ' + (L.w + 1) + ' do plano · Mês ' + m + ': ' + PHASES[m] + '</span>' + (label ? '<span class="lflag">' + label + '</span>' : '') + '<span class="lprog">' + x.n + '/' + x.total + ' tarefas</span><button class="btn sm" data-quiz-li="' + L.li + '" type="button">Gerar exercícios desta aula</button></div><div class="blocks">' + L.blocks.map((b, n) => blockHTML(b, L, n + 1)).join('') + '</div></section>';
 }
 function openBtn(li, txt) { return '<button class="linkbtn" data-li="' + li + '">' + txt + '</button>'; }
+const uniqL = arr => arr.filter((L, i) => arr.indexOf(L) === i).sort((a, b) => a.li - b.li);
+const listDays = days => { const a = [...days].sort((p, q) => p - q).map(shortDate); return a.length > 1 ? a.slice(0, -1).join(', ') + ' e ' + a[a.length - 1] : a[0] || ''; };
+// situação de uma aula em poucas palavras
+function lessonStatus(li, onDn) {
+  const x = SCH.info[li], when = SCH.lessonDn[li];
+  if (x.complete) return { cls: 'done', txt: x.doneDn === onDn ? 'concluída neste dia' : x.doneDn === SCH.tDn ? 'concluída hoje' : 'concluída em ' + shortDate(x.doneDn) };
+  if (x.n) return { cls: 'prog', txt: 'em andamento · ' + x.n + '/' + x.total };
+  if (li === SCH.todayLi) return { cls: 'today', txt: 'aula de hoje' };
+  return { cls: 'next', txt: when != null ? 'prevista ' + DOW_S[dowOf(when)].toLowerCase() + ' ' + shortDate(when) : '' };
+}
+// aulas estudadas num dia que não aparecem como a aula daquele dia (aula feita em vários dias, no fim de semana ou revisitada)
+function workedNote(e, skip, lead) {
+  const ls = uniqL([...e.lessons, ...e.adv, ...e.worked]).filter(L => !skip.includes(L));
+  if (!ls.length) return '';
+  return '<p class="note studied">' + lead + ' ' + ls.map(L => openBtn(L.li, 'Aula ' + (L.li + 1)) + ' <span class="kind">(' + lessonStatus(L.li, e.dn).txt + ')</span>').join(', ') + '</p>';
+}
+// atalho para rever as aulas já estudadas (aparece no dia de hoje)
+function recentNote(skip) {
+  const rec = SCH.info.filter(x => x.n && !skip.includes(x.L)).sort((a, b) => Math.max(...b.days) - Math.max(...a.days) || b.L.li - a.L.li).slice(0, 3).map(x => x.L);
+  return '<p class="note recent">' + (rec.length ? 'Rever aulas anteriores: ' + rec.map(L => openBtn(L.li, 'Aula ' + (L.li + 1))).join(' · ') + ' · ' : '') + '<button class="linkbtn" data-goview="aulas">Todas as aulas</button></p>';
+}
 function dayHTML(dn) {
   const e = entryOf(dn), c = weekOf(dn), isToday = dn === SCH.tDn;
   const head = '<div class="dayhead"><button class="nav" data-dn="' + (dn - 1) + '"' + (dn <= SCH.startDn ? ' disabled' : '') + ' aria-label="Dia anterior">‹</button><div class="dh"><p class="eyebrow">' + (isToday ? 'Hoje · ' : '') + 'Semana ' + (c + 1) + ' do calendário</p><h2>' + fullDate(dn) + '</h2></div><button class="nav" data-dn="' + (dn + 1) + '" aria-label="Próximo dia">›</button></div>';
   let body = '';
   if (e.dow < 5) {
     const ls = e.lessons, adv = e.adv;
+    if (isToday) body += recentNote([...ls, ...adv]);
     if (isToday && SCH.behind > 0) body += '<p class="note warn">Você está ' + SCH.behind + ' aula' + (SCH.behind > 1 ? 's' : '') + ' atrás do plano original. A agenda já foi empurrada: término previsto em ' + longDate(SCH.endDn) + '.</p>';
     if (!ls.length && !adv.length) {
-      if (dn < SCH.tDn) body += '<article class="block a-rv wide"><h3>Nenhuma aula concluída neste dia</h3><p class="txt">A aula que estava prevista passou para o próximo dia útil e o restante da agenda foi empurrado.' + (e.partial.length ? ' Neste dia você começou: ' + e.partial.map(L => openBtn(L.li, 'Aula ' + (L.li + 1))).join(', ') + '.' : '') + '</p></article>';
+      if (dn < SCH.tDn && e.worked.length) {
+        // dia em que a aula foi só começada: mostra a aula inteira, que continua acessível aqui
+        body += '<p class="note">Neste dia você estudou parte ' + (e.worked.length > 1 ? 'destas aulas' : 'desta aula') + '. O que faltou passou para o dia seguinte e a agenda foi empurrada. O conteúdo completo continua aqui e na aba ' + '<button class="linkbtn" data-goview="aulas">Aulas</button>.</p>';
+        uniqL(e.worked).forEach(L => { body += lessonHTML(L, 'estudada neste dia · ' + lessonStatus(L.li, dn).txt); });
+      } else if (dn < SCH.tDn) body += '<article class="block a-rv wide"><h3>Nenhuma aula estudada neste dia</h3><p class="txt">A aula que estava prevista passou para o próximo dia útil e o restante da agenda foi empurrado.</p></article>';
       else body += '<article class="block a-rv wide"><h3>Todas as aulas já estão concluídas</h3><p class="txt">Use o tempo até a prova para fazer provas antigas completas do INEP e revisar o caderno de erros.</p></article>';
     }
     ls.forEach(L => {
       const x = SCH.info[L.li];
-      const label = dn < SCH.tDn ? 'concluída' : isToday ? (x.complete ? 'concluída hoje' : (x.n ? 'em andamento' : '')) : 'prevista';
+      const label = dn < SCH.tDn ? (x.days.size > 1 ? 'concluída · estudada em ' + listDays(x.days) : 'concluída') : isToday ? (x.complete ? 'concluída hoje' : (x.n ? 'em andamento' : '')) : 'prevista';
       body += lessonHTML(L, label);
     });
-    if (adv.length) body += '<p class="note">Também concluída neste dia (adiantada): ' + adv.map(L => 'Aula ' + (L.li + 1)).join(', ') + '.</p>';
+    if (adv.length) body += '<p class="note">Também concluída neste dia (adiantada): ' + adv.map(L => openBtn(L.li, 'Aula ' + (L.li + 1))).join(', ') + '.</p>';
+    if (ls.length || adv.length) body += workedNote(e, [...ls, ...adv], isToday ? 'Hoje você também estudou:' : 'Neste dia você também estudou:');
     if (isToday && ls.length && SCH.info[ls[0].li].complete && SCH.nextPending != null) body += '<p class="note ok">Aula de hoje concluída. Quer adiantar? ' + openBtn(SCH.nextPending, 'Abrir a Aula ' + (SCH.nextPending + 1)) + '</p>';
   } else if (e.dow === 5) {
     const wk = SCH.weeks[c];
+    if (isToday) body += recentNote([]);
+    body += workedNote(e, [], isToday ? 'Hoje você também estudou:' : 'Neste dia você também estudou:');
     body += '<article class="block a-rv wide"><div class="bhead"><span class="chip a-rv">' + (wk && wk.sim ? 'Simulado' : 'Dia de revisão semanal') + '</span><span class="dur">5h</span></div><h3>' + (wk && wk.sim ? 'Simulado em condições de prova' : 'O que revisar nesta semana') + '</h3>' + (wk && !wk.sim && wk.lessons.length ? '<p class="xbtns"><button class="btn sm" type="button" data-quiz-week="' + c + '">Gerar exercícios dos temas da semana</button></p>' : '') + '<ul class="tasks">' + satItems(c).map(taskHTML).join('') + '</ul></article>';
   } else {
     const lastL = (SCH.weeks[c] && SCH.weeks[c].lessons.slice(-1)[0]) || LESSONS[Math.max(0, (SCH.nextPending || 1) - 1)];
+    if (isToday) body += recentNote([]);
+    body += workedNote(e, [], isToday ? 'Hoje você também estudou:' : 'Neste dia você também estudou:');
     body += '<article class="block a-rv wide rest"><div class="bhead"><span class="chip a-rv">Descanso</span></div><h3>Domingo livre</h3><p class="txt">Descansar faz parte do plano: a memória se consolida no sono e no tempo livre. Leitura leve do mês, se quiser: <strong>' + esc(BOOKS[monthOf(lastL.w) - 1]) + '</strong>.</p>' + (isToday && SCH.nextPending != null && SCH.behind > 0 ? '<p class="txt">Se quiser recuperar o atraso hoje: ' + openBtn(SCH.nextPending, 'abrir a Aula ' + (SCH.nextPending + 1)) + '.</p>' : '') + '</article>';
   }
   return head + body;
 }
+// página de uma aula: anterior, de hoje ou futura, sempre com o conteúdo completo
+function lessonPageHTML(li) {
+  const L = LESSONS[li], x = SCH.info[li], when = SCH.lessonDn[li];
+  let eb, label;
+  if (x.complete) { eb = 'Concluída em ' + fullDate(x.doneDn) + (x.days.size > 1 ? ' · estudada em ' + listDays(x.days) : ''); label = 'concluída'; }
+  else if (x.n) { eb = 'Em andamento · estudada em ' + listDays(x.days) + (li === SCH.todayLi ? ' · é a aula de hoje' : when != null ? ' · prevista para ' + fullDate(when) : ''); label = 'em andamento'; }
+  else if (li === SCH.todayLi) { eb = 'Aula de hoje'; label = ''; }
+  else { eb = 'Ainda não começada · prevista para ' + (when != null ? fullDate(when) : '—'); label = ''; }
+  const back = '<p class="note backs"><button class="linkbtn" data-dn="' + SCH.pivot + '">‹ Voltar para hoje</button> · <button class="linkbtn" data-goview="aulas">Todas as aulas</button></p>';
+  return back + '<div class="dayhead"><button class="nav" data-li="' + (li - 1) + '"' + (li > 0 ? '' : ' disabled') + ' aria-label="Aula anterior">‹</button><div class="dh"><p class="eyebrow">' + eb + '</p><h2>Aula ' + (li + 1) + ' de ' + NL + '</h2></div><button class="nav" data-li="' + (li + 1) + '"' + (li < NL - 1 ? '' : ' disabled') + ' aria-label="Próxima aula">›</button></div>' + lessonHTML(L, label);
+}
+// aba Aulas: todas as aulas, com busca
+let AULAS_Q = '';
+function topicsOf(L) {
+  return L.blocks.filter(b => b.s !== 'REV').map(b => {
+    const s = b.tracks ? S.lem : b.s, its = itemsOf(b), mods = [];
+    its.forEach(t => { if (t.mod && !mods.includes(t.mod)) mods.push(t.mod); });
+    const first = its[0] || {};
+    return { s, txt: mods.length ? mods.map(m => m.name).join(' · ') : first.aulao ? 'Aulão de revisão do canal' : first.type === 'rf' ? 'Revisão final' : first.title || '' };
+  });
+}
+function renderAulas() {
+  if (cur && cur.li != null) { $('#view').innerHTML = lessonPageHTML(cur.li); return; }
+  const nDone = SCH.info.filter(x => x.complete).length, nProg = SCH.info.filter(x => !x.complete && x.n).length;
+  const lastDone = SCH.info.filter(x => x.complete).sort((a, b) => b.doneDn - a.doneDn || b.L.li - a.L.li)[0];
+  let html = '<p class="lede">As ' + NL + ' aulas com o conteúdo completo: vídeos, exercícios e bolinhas. Abra qualquer aula quando quiser, inclusive as que você já concluiu ou estudou em mais de um dia.</p>' +
+    '<div class="aulas-top"><input type="search" id="aulas-q" placeholder="Buscar por número, matéria ou tema" aria-label="Buscar aula" value="' + esc(AULAS_Q) + '" autocomplete="off"><span class="anums">' + nDone + ' concluída' + (nDone === 1 ? '' : 's') + (nProg ? ' · ' + nProg + ' em andamento' : '') + '</span></div>' +
+    '<p class="xbtns">' + (SCH.todayLi != null ? '<button class="btn sm" data-li="' + SCH.todayLi + '">Aula de hoje: Aula ' + (SCH.todayLi + 1) + '</button>' : SCH.nextPending != null ? '<button class="btn sm" data-li="' + SCH.nextPending + '">Próxima: Aula ' + (SCH.nextPending + 1) + '</button>' : '') + (lastDone ? '<button class="btn sm ghost" data-li="' + lastDone.L.li + '">Última concluída: Aula ' + (lastDone.L.li + 1) + '</button>' : '') + '</p>';
+  let lastM = 0;
+  LESSONS.forEach(L => {
+    const m = monthOf(L.w);
+    if (m !== lastM) { html += (lastM ? '</ul>' : '') + '<h2 class="month lgroup" data-m="' + m + '"><span>Mês ' + m + '</span> ' + esc(PHASES[m]) + '</h2><ul class="lrows" data-m="' + m + '">'; lastM = m; }
+    const x = SCH.info[L.li], st = lessonStatus(L.li), tp = topicsOf(L);
+    const q = N('aula ' + (L.li + 1) + ' ' + st.txt + ' ' + tp.map(t => SUBJECTS[t.s].n + ' ' + t.txt).join(' '));
+    html += '<li data-n="' + (L.li + 1) + '" data-q="' + esc(q) + '"><button class="lrow st-' + st.cls + '" data-li="' + L.li + '"><span class="lrn">Aula ' + (L.li + 1) + '</span><span class="lrt">' + tp.map(t => '<span class="a-' + SUBJECTS[t.s].a + '"><b>' + esc(SUBJECTS[t.s].n) + '</b> ' + esc(t.txt) + '</span>').join('') + '</span><span class="lrs">' + esc(st.txt) + '</span><span class="mini"><b style="width:' + Math.round(x.n / Math.max(1, x.total) * 100) + '%"></b></span></button></li>';
+  });
+  html += '</ul><p class="note" id="aulas-none" hidden>Nenhuma aula encontrada. Tente outra palavra, como "frações" ou "Brasil Colônia".</p>';
+  $('#view').innerHTML = html;
+  filterAulas();
+}
+function filterAulas() {
+  const raw = AULAS_Q.trim(), q = N(raw), num = /^\d+$/.test(raw) ? raw : null;
+  const words = q.split(/\s+/).filter(Boolean);
+  let any = false;
+  document.querySelectorAll('.lrows li').forEach(li => {
+    const ok = num ? li.dataset.n === num : words.every(w => li.dataset.q.includes(w));
+    li.hidden = !ok; if (ok) any = true;
+  });
+  document.querySelectorAll('.lrows').forEach(ul => {
+    const vis = [...ul.children].some(li => !li.hidden);
+    ul.hidden = !vis;
+    const h = document.querySelector('.lgroup[data-m="' + ul.dataset.m + '"]'); if (h) h.hidden = !vis;
+  });
+  const none = $('#aulas-none'); if (none) none.hidden = any;
+}
+document.addEventListener('input', e => { if (e.target.id === 'aulas-q') { AULAS_Q = e.target.value; filterAulas(); } });
 function renderHoje() {
+  if (cur && cur.li != null) { $('#view').innerHTML = lessonPageHTML(cur.li); return; }
   const back = '<p class="note"><button class="linkbtn" data-dn="' + SCH.pivot + '">Voltar para hoje</button></p>';
-  if (cur && cur.li != null) {
-    const L = LESSONS[cur.li];
-    const when = SCH.lessonDn[L.li];
-    $('#view').innerHTML = back + '<div class="dayhead single"><div class="dh"><p class="eyebrow">Adiantando · prevista para ' + (when != null ? fullDate(when) : '—') + '</p><h2>Aula ' + (L.li + 1) + ' de ' + NL + '</h2></div></div>' + lessonHTML(L, SCH.info[L.li].complete ? 'concluída' : '');
-    return;
-  }
   const dn = cur && cur.dn != null ? cur.dn : SCH.pivot;
   let note = '';
   if (SCH.tDn < SCH.startDn && dn === SCH.startDn) note = '<p class="note">O cronograma começa em ' + (SCH.startDn - SCH.tDn) + ' dia' + (SCH.startDn - SCH.tDn > 1 ? 's' : '') + '. Abaixo está o primeiro dia.</p>';
@@ -3955,9 +4069,12 @@ function renderSemanas() {
           if (day > SCH.tDn) cls = ' future';
           if (x.complete) cls += ' full';
         } else if (day < SCH.startDn) label = '<span class="dlab">antes do início</span>';
-        else if (day < SCH.tDn) { label = '<span class="dlab">' + (e.partial.length ? 'Aula ' + (e.partial[0].li + 1) + ' iniciada' : 'sem aula') + '</span>'; cls = ' gap'; }
+        else if (day < SCH.tDn) { label = e.worked.length ? '<span class="aula">Aula ' + uniqL(e.worked).map(z => z.li + 1).join(', ') + '</span><span class="dlab">estudou uma parte</span>' : '<span class="dlab">sem aula</span>'; cls = ' gap'; }
         else label = '<span class="dlab">—</span>';
-      } else label = '<span class="dlab">' + (d === 5 ? (wk.sim ? 'Simulado' : 'Revisão') : 'Descanso') + '</span>';
+      } else {
+        const ls = uniqL([...e.lessons, ...e.adv, ...e.worked]);
+        label = '<span class="dlab">' + (d === 5 ? (wk.sim ? 'Simulado' : 'Revisão') : 'Descanso') + '</span>' + (ls.length ? '<span class="aula">+ Aula ' + ls.map(z => z.li + 1).join(', ') + '</span>' : '');
+      }
       html += '<button class="wkday' + cls + (day === SCH.tDn ? ' today' : '') + '" data-dn="' + day + '"><span class="dn">' + DOW_S[d] + ' ' + shortDate(day) + '</span>' + label + bar + '</button>';
     }
     const groups = [];
@@ -4002,6 +4119,7 @@ ${transferHTML()}
 <section><h2>Como usar</h2>
 <p>Abra a aba <b>Hoje</b> todos os dias. Ela mostra a aula do dia: os blocos em ordem, com os vídeos do canal Curso Enem Gratuito, as fontes extras e os exercícios. Marque cada bolinha ao terminar.</p>
 <p><b>A agenda se ajusta sozinha.</b> Cada dia útil recebe a próxima aula que ainda não foi concluída. Se uma aula ficar com alguma bolinha em branco, no dia seguinte ela aparece de novo (só com o que falta) e todas as aulas seguintes são empurradas um dia útil. Sábado continua sendo revisão da semana e domingo continua sendo descanso. Se você terminar a aula do dia, pode adiantar a próxima.</p>
+<p><b>Aulas anteriores ficam sempre disponíveis.</b> A aba <b>Aulas</b> lista as ${NL} aulas com o conteúdo completo, inclusive as que você já concluiu ou estudou em vários dias. Dá para buscar por número, matéria ou tema. Na aba Hoje, o atalho "Rever aulas anteriores" abre as últimas que você estudou.</p>
 <p>No topo aparecem o <b>término previsto</b> e o <b>limite</b>: um mês antes da data da prova. Como o INEP ainda não divulgou a data do ENEM 2027, o padrão é 07/11/2027; troque no campo "Prova" quando sair o edital. Se a previsão passar do limite, o topo avisa.</p>
 <p><b>O progresso fica salvo.</b> Cada bolinha é gravada na hora, no navegador que você está usando, sem conta e sem internet. Para passar o progresso para outro aparelho ou guardar uma cópia, use "Salvar e levar seu progresso", no início desta aba.</p>
 <p>Quando houver outros vídeos do canal sobre o mesmo tema, eles aparecem como <b>reforço opcional</b> embaixo do vídeo principal e não contam para concluir a aula.</p></section>
@@ -4081,20 +4199,29 @@ function renderTop() {
 function render() {
   buildSchedule();
   renderTop();
-  ({ hoje: renderHoje, semanas: renderSemanas, exercicios: renderExercicios, materias: renderMaterias, metodologia: renderMetodologia, metodo: renderMetodo })[view]();
+  ({ hoje: renderHoje, aulas: renderAulas, semanas: renderSemanas, exercicios: renderExercicios, materias: renderMaterias, metodologia: renderMetodologia, metodo: renderMetodo })[view]();
 }
+// redesenha sem tirar a pessoa da aula ou do ponto da página em que está (usado quando chega progresso de outro aparelho)
+function rerender() { const y = window.scrollY; render(); window.scrollTo(0, y); }
+// tarefa → aula (para avisar quando uma aula concluída volta a ficar incompleta)
+let KEY2LI = null;
+function lessonOfKey(k) {
+  if (!KEY2LI) { KEY2LI = {}; LESSONS.forEach(L => L.blocks.forEach(b => (b.s === 'REV' ? revItems(L) : b.tracks ? b.tracks.ING.concat(b.tracks.ESP) : b.items || []).forEach(t => { KEY2LI[t.k] = L.li; }))); }
+  return KEY2LI[k];
+}
+const UNDO = {}; // data original de tarefas desmarcadas nesta sessão (marcar de novo devolve a data)
 
 // ---------- eventos ----------
 document.addEventListener('change', e => {
   const el = e.target;
   if (el.matches('input.bub')) {
-    const k = el.dataset.k;
-    if (el.checked) S.done[k] = todayDn(); else delete S.done[k];
+    const k = el.dataset.k, li = lessonOfKey(k);
+    const wasPast = li != null && SCH.info[li].complete && SCH.info[li].doneDn < todayDn();
+    if (el.checked) { S.done[k] = UNDO[k] || todayDn(); delete UNDO[k]; } else { UNDO[k] = S.done[k]; delete S.done[k]; }
     el.closest('.task').classList.toggle('is-done', el.checked);
     touch();
-    const y = window.scrollY;
-    render();
-    window.scrollTo(0, y);
+    rerender();
+    if (!el.checked && wasPast) flash('A Aula ' + (li + 1) + ' ficou com uma bolinha em branco e voltou para a agenda. Marque de novo para desfazer.');
     const again = document.querySelector('input.bub[data-k="' + CSS.escape(k) + '"]'); if (again) again.focus({ preventScroll: true });
   } else if (el.id === 'start' && el.value) {
     S.start = el.value; cur = null; touch(); render();
@@ -4104,9 +4231,11 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('click', e => {
   const go = e.target.closest('[data-dn]');
-  if (go && !go.disabled) { cur = { dn: +go.dataset.dn }; if (cur.dn === SCH.pivot) cur = null; view = 'hoje'; render(); window.scrollTo({ top: 0 }); return; }
+  if (go && !go.disabled) { cur = { dn: +go.dataset.dn }; if (cur.dn === SCH.pivot) cur = null; view = 'hoje'; setHash('hoje'); render(); window.scrollTo({ top: 0 }); return; }
   const op = e.target.closest('[data-li]');
-  if (op) { cur = { li: +op.dataset.li }; view = 'hoje'; render(); window.scrollTo({ top: 0 }); return; }
+  if (op && !op.disabled) { cur = { li: +op.dataset.li }; if (view !== 'aulas') view = 'hoje'; setHash('aula-' + (cur.li + 1)); render(); window.scrollTo({ top: 0 }); return; }
+  const gv = e.target.closest('[data-goview]');
+  if (gv) { view = gv.dataset.goview; cur = null; setHash(view); render(); window.scrollTo({ top: 0 }); return; }
   const met = e.target.closest('[data-met]');
   if (met) { openMet(met.dataset.met); return; }
   const qz = e.target.closest('[data-quiz-li]');
@@ -4116,7 +4245,7 @@ document.addEventListener('click', e => {
   const jump = e.target.closest('[data-jump]');
   if (jump) { if (view !== 'metodologia') { view = 'metodologia'; try { history.replaceState(null, '', '#metodologia'); } catch (err) {} render(); } const t = document.getElementById(jump.dataset.jump); if (t) t.scrollIntoView({ block: 'start' }); return; }
   const tab = e.target.closest('.tabs button');
-  if (tab) { view = tab.dataset.view; if (view === 'hoje') cur = null; try { history.replaceState(null, '', '#' + view); } catch (err) {} render(); }
+  if (tab) { view = tab.dataset.view; cur = null; setHash(view); render(); }
 });
 let flashT;
 function flash(msg) { const f = $('#flash'); f.textContent = msg; f.hidden = false; clearTimeout(flashT); flashT = setTimeout(() => { f.hidden = true; }, 3500); }
@@ -4424,7 +4553,7 @@ function syncQuiz(a, b) {
 // outro aparelho gravou e este não mudou nada: adota a versão de lá
 function syncAdopt(r) {
   S = Object.assign({}, S, { start: r.start || S.start, exam: r.exam || S.exam, lem: r.lem || S.lem, done: Object.assign({}, r.done || {}), quiz: syncQuiz(S.quiz, r.quiz), t: r.t });
-  saveLocal(); cur = null; render();
+  saveLocal(); rerender();
 }
 // os dois aparelhos mudaram desde a última sincronização: junta as marcações dos dois
 function syncUnion(r) {
@@ -4432,7 +4561,7 @@ function syncUnion(r) {
   Object.entries(S.done).forEach(([k, v]) => { done[k] = done[k] ? Math.min(done[k], v) : v; });
   const newer = (r.t || 0) > (S.t || 0);
   S = Object.assign({}, S, { start: r.start && r.start < S.start ? r.start : S.start, exam: newer && r.exam ? r.exam : S.exam, lem: newer && r.lem ? r.lem : S.lem, done, quiz: syncQuiz(S.quiz, r.quiz), t: Math.max(S.t || 0, r.t || 0) + 1 });
-  saveLocal(); cur = null; render();
+  saveLocal(); rerender();
 }
 async function accSync() {
   if (!accOn()) return;
